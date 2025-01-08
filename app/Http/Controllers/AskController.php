@@ -14,8 +14,8 @@ class AskController extends Controller
         $models = (new ChatService())->getModels();
         $selectedModel = ChatService::DEFAULT_MODEL;
         $conversations = Conversation::all();
-        // $currentConversation get the conversation from DB where more recent message
-        $currentConversation = $conversations->last()->load('messages');
+        // Get the last conversation with messages, or null if none exists
+        $currentConversation = Conversation::with('messages')->latest()->first();
 
         return Inertia::render('Ask/Index', [
             'models' => $models,
@@ -34,16 +34,25 @@ class AskController extends Controller
         ]);
 
         try {
-            if ($request->conversation_id) {
-                $conversation = Conversation::findOrFail($request->conversation_id);
-            } else {
-                $conversation = Conversation::create();
-            }
             $message = [
                 'role' => 'user',
                 'content' => $request->message,
             ];
+            if ($request->conversation_id) {
+                $conversation = Conversation::findOrFail($request->conversation_id);
+            } else {
+                $conversation = Conversation::create();
+                $titleMessage = $message;
+                $titleMessage['content'] = 'donne moi un titre de conversation en une ligne pour ce message, soit clair et concis pas plus de 10 mots : ' . $message['content'];
+
+                $conversation->title = (new ChatService())->sendMessage(
+                    messages: [$titleMessage],
+                    model: $request->model
+                );
+                $conversation->save();
+            }
             $conversation->messages()->create($message);
+
 
             $response = (new ChatService())->sendMessage(
                 messages: $conversation->messages->map->only('role', 'content')->toArray(),
@@ -55,7 +64,7 @@ class AskController extends Controller
                 'content' => $response,
             ]);
 
-            return redirect()->back()->with('message', $response);
+            return redirect()->back()->with(['message' => $response, 'conversations' => Conversation::all()]);
         } catch (\Exception $e) {
             return redirect()->back()->with('error', 'Erreur: ' . $e->getMessage());
         }
