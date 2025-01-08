@@ -14,7 +14,6 @@ class AskController extends Controller
         $models = (new ChatService())->getModels();
         $selectedModel = ChatService::DEFAULT_MODEL;
         $conversations = Conversation::all();
-        // Get the last conversation with messages, or null if none exists
         $currentConversation = Conversation::with('messages')->latest()->first();
 
         return Inertia::render('Ask/Index', [
