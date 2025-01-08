@@ -38,14 +38,14 @@ const logout = () => {
         <Banner />
 
         <div class="min-h-screen bg-gray-900">
-            <nav class="bg-gray-800 border-b border-gray-700">
+            <nav class="h-16 bg-gray-800 border-b border-gray-700">
                 <!-- Primary Navigation Menu -->
                 <div class="px-4 mx-auto max-w-7xl sm:px-6 lg:px-8">
                     <div class="flex justify-between h-16">
                         <div class="flex">
                             <!-- Logo -->
                             <div class="flex items-center shrink-0">
-                                <Link :href="route('dashboard')">
+                                <Link :href="route('ask.index')">
                                     <ApplicationMark
                                         class="block w-auto text-purple-500 h-9"
                                     />
@@ -57,11 +57,11 @@ const logout = () => {
                                 class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex"
                             >
                                 <NavLink
-                                    :href="route('dashboard')"
-                                    :active="route().current('dashboard')"
-                                    class="text-gray-300 hover:text-white"
+                                    :href="route('ask.index')"
+                                    :active="route().current('ask')"
+                                    class="text-gray-100 hover:text-white"
                                 >
-                                    Dashboard
+                                    Chat
                                 </NavLink>
                             </div>
                         </div>
@@ -358,11 +358,11 @@ const logout = () => {
                 >
                     <div class="pt-2 pb-3 space-y-1">
                         <ResponsiveNavLink
-                            :href="route('dashboard')"
-                            :active="route().current('dashboard')"
+                            :href="route('ask.index')"
+                            :active="route().current('ask')"
                             class="text-gray-300 hover:text-white hover:bg-gray-700"
                         >
-                            Dashboard
+                            Chat
                         </ResponsiveNavLink>
                     </div>
 
@@ -529,7 +529,8 @@ const logout = () => {
             </header>
 
             <!-- Page Content -->
-            <main>
+            <main class="h-[calc(100vh-4rem-1px)]">
+                <!-- 4rem (64px) for navbar, 1px for border -->
                 <slot />
             </main>
         </div>

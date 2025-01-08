@@ -8,7 +8,8 @@ class Message extends Model
 {
     protected $fillable = [
         'conversation_id',
-        'value'
+        'role',
+        'content'
     ];
 
     public function conversation()
