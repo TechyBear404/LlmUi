@@ -14,6 +14,9 @@ return new class extends Migration
         Schema::create('conversations', function (Blueprint $table) {
             $table->id();
             $table->string('title')->default('Conversation en cours ...');
+            $table->string('model_id');
+            $table->string('model_name');
+            $table->foreignId('user_id')->constrained()->onDelete('cascade');
             $table->timestamps();
         });
     }

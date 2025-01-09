@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 
 class ChatService
@@ -61,43 +62,79 @@ class ChatService
      *
      * @return string
      */
-    public function sendMessage(array $messages, string $model = null, float $temperature = 0.7): string
+    public function sendMessage(array $messages, ?string $model = null, float $temperature = 0.7, bool $isTitle = false): string
     {
         try {
-            logger()->info('Envoi du message', [
+            logger()->info('Starting sendMessage request', [
                 'model' => $model,
                 'temperature' => $temperature,
+                'isTitle' => $isTitle,
+                'messagesCount' => count($messages)
             ]);
+
+            if ($isTitle) {
+                array_unshift($messages, $this->getTitleSystemPrompt());
+            } else {
+                array_unshift($messages, $this->getChatSystemPrompt());
+            }
 
             $models = collect($this->getModels());
             if (!$model || !$models->contains('id', $model)) {
                 $model = self::DEFAULT_MODEL;
-                logger()->info('Modèle par défaut utilisé:', ['model' => $model]);
             }
 
-            $messages = [$this->getChatSystemPrompt(), ...$messages];
+            logger()->info('API request parameters', [
+                'model' => $model,
+                'messages' => $messages,
+                'temperature' => $temperature
+            ]);
+
             $response = $this->client->chat()->create([
                 'model' => $model,
                 'messages' => $messages,
                 'temperature' => $temperature,
             ]);
 
-            logger()->info('Réponse reçue:', ['response' => $response]);
+            logger()->info('API response received', [
+                'status' => 'success',
+                'content_length' => strlen($response->choices[0]->message->content ?? '')
+            ]);
 
-            $content = $response->choices[0]->message->content;
-
-            return $content;
-        } catch (\Exception $e) {
-            if ($e->getMessage() === 'Undefined array key "choices"') {
-                throw new \Exception("Limite de messages atteinte");
+            if (!isset($response->choices[0]->message->content)) {
+                throw new \Exception("Invalid response from API");
             }
 
-            logger()->error('Erreur dans sendMessage:', [
+            return $response->choices[0]->message->content;
+        } catch (\Exception $e) {
+            logger()->error('Error in sendMessage:', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'model' => $model,
+                'temperature' => $temperature,
+                'isTitle' => $isTitle
+            ]);
+            throw $e;
+        }
+    }
+
+    public function makeTitle(string $message, string $model): string
+    {
+        try {
+            $messages = [
+                [
+                    'role' => 'user',
+                    'content' => $message
+                ]
+            ];
+
+            return $this->sendMessage($messages, $model, 0.7, true);
+        } catch (\Exception $e) {
+            logger()->error('Error in makeTitle:', [
                 'message' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
-
-            throw $e;
+            // Return a truncated version of the message if title generation fails
+            return substr($message, 0, 50) . '...';
         }
     }
 
@@ -115,7 +152,7 @@ class ChatService
      */
     private function getChatSystemPrompt(): array
     {
-        $user = auth()->user();
+        $user = Auth::user();
         $now = now()->locale('fr')->format('l d F Y H:i');
 
         return [
@@ -123,6 +160,20 @@ class ChatService
             'content' => <<<EOT
                 Tu es un assistant de chat. La date et l'heure actuelle est le {$now}.
                 Tu es actuellement utilisé par {$user->name}.
+                Tu dois utilisé le Markdown pour formater tes réponses.
+                EOT,
+        ];
+    }
+
+    private function getTitleSystemPrompt(): array
+    {
+        return [
+            'role' => 'system',
+            'content' => <<<EOT
+                Tu es un assistant
+                Ton travail est de crée des titre de conversation a partir de message d'ouverture
+                Le titre doit etre clair et concis
+                Le titre ne doit pas depasser 10 mots
                 EOT,
         ];
     }

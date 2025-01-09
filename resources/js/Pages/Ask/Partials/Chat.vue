@@ -9,11 +9,12 @@
                     v-model="form.model"
                     name="model"
                     class="w-full max-w-xs px-3 py-2 text-gray-200 bg-gray-700 border border-gray-600 rounded-md focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    @change="handleModelChange"
                 >
                     <option
-                        v-for="model in models"
-                        :value="model.id"
+                        v-for="(model, id) in models"
                         :key="model.id"
+                        :value="model"
                     >
                         {{ model.name }}
                     </option>
@@ -68,14 +69,47 @@
                             <!-- Message Content -->
                             <div
                                 :class="[
-                                    'max-w-[80%] p-4 rounded-2xl break-words transition-colors',
+                                    'max-w-[80%] p-4 rounded-2xl break-words transition-colors flex flex-col gap-4',
                                     message.role === 'user'
-                                        ? 'bg-purple-600 text-white rounded-br-none hover:bg-purple-700'
-                                        : 'bg-gray-800 text-gray-200 rounded-bl-none hover:bg-gray-700',
-                                    'prose prose-invert prose-pre:bg-gray-900',
+                                        ? 'bg-purple-600 text-purple-100 rounded-br-none '
+                                        : 'bg-gray-800 text-gray-200 rounded-bl-none ',
+                                    'prose prose-p:my-0 prose-invert prose-pre:bg-gray-900',
                                 ]"
-                                v-html="renderMarkdown(message.content)"
-                            ></div>
+                            >
+                                <div
+                                    v-html="renderMarkdown(message.content)"
+                                ></div>
+                                <div
+                                    class="flex justify-between"
+                                    :class="
+                                        message.role === 'user'
+                                            ? 'text-purple-200'
+                                            : 'text-gray-400'
+                                    "
+                                >
+                                    <div class="text-xs">
+                                        {{ formatDateTime(message.updated_at) }}
+                                    </div>
+                                    <div
+                                        class="flex items-center gap-1 hover:text-gray-300 hover:cursor-pointer"
+                                        v-if="message.role === 'assistant'"
+                                        @click="
+                                            copyToClipboard(message.content)
+                                        "
+                                    >
+                                        <span v-if="isCopied" class="text-xs"
+                                            >Copié</span
+                                        >
+                                        <font-awesome-icon
+                                            :icon="
+                                                isCopied
+                                                    ? 'fa-solid fa-clipboard-check'
+                                                    : 'fa-regular fa-clipboard'
+                                            "
+                                        />
+                                    </div>
+                                </div>
+                            </div>
 
                             <!-- User Avatar - only shown for user messages -->
                             <div
@@ -165,6 +199,39 @@ import { ref, watch, nextTick, onMounted } from "vue";
 import MarkdownIt from "markdown-it";
 import hljs from "highlight.js";
 import "highlight.js/styles/github-dark.css";
+import { formatDateTime } from "@/Lib/utils";
+
+const props = defineProps({
+    models: {
+        type: Array,
+        required: true,
+        default: () => ({}),
+    },
+    flash: {
+        type: Object,
+        default: () => ({}),
+    },
+    conversation: {
+        type: Object,
+        required: false,
+        default: null,
+    },
+});
+
+// Initialize messages as an empty array
+const messages = ref([]);
+
+const form = useForm({
+    message: "",
+    model: null,
+    conversation_id: null,
+});
+
+const messageContainer = ref(null);
+const messageInput = ref(null);
+const isCopied = ref(false);
+
+const emit = defineEmits(["message-sent", "selected-model"]);
 
 // Configure markdown-it with syntax highlighting
 const md = new MarkdownIt({
@@ -193,38 +260,6 @@ const renderMarkdown = (content) => {
     }
 };
 
-const props = defineProps({
-    models: {
-        type: Array,
-        required: true,
-    },
-    selectedModel: {
-        type: String,
-        required: true,
-    },
-    flash: {
-        type: Object,
-        default: () => ({}),
-    },
-    conversation: {
-        type: Object,
-        required: false,
-        default: null,
-    },
-});
-console.log(props.conversation);
-
-const messages = ref([]);
-
-const form = useForm({
-    message: "",
-    model: props.selectedModel,
-    conversation_id: null,
-});
-
-const messageContainer = ref(null);
-const messageInput = ref(null);
-
 // Scroll to bottom of messages
 const scrollToBottom = () => {
     nextTick(() => {
@@ -249,46 +284,99 @@ const adjustTextareaHeight = () => {
     textarea.style.height = `${newHeight}px`;
 };
 
-const sendMessage = () => {
+const sendMessage = async () => {
     if (!form.message) return;
 
-    messages.value.push({
+    form.processing = true;
+
+    // Create a new message object
+    const newMessage = {
         role: "user",
         content: form.message,
-    });
+        updated_at: new Date().toISOString(),
+    };
 
-    // Add user message to chat
-    // messages.value.push({
-    //     role: "user",
-    //     content: form.message,
-    // });
+    // Ensure messages is an array before pushing
+    if (!Array.isArray(messages.value)) {
+        messages.value = [];
+    }
 
-    // Send complete message history
-    // form.messages = messages.value;
-
-    form.post(route("ask.post"), {
-        preserveScroll: true,
-        onSuccess: () => {
-            form.reset("message");
-        },
-    });
-
+    messages.value.push(newMessage);
     scrollToBottom();
 
-    // Reset textarea height after sending
-    nextTick(() => {
-        if (messageInput.value) {
-            messageInput.value.style.height = "auto";
+    const endpoint = `/conversations/${props.conversation.id}/messages`;
+
+    try {
+        form.post(route("ask.post"), {
+            preserveScroll: true,
+            onSuccess: (response) => {
+                console.log(response);
+                // emit("message-sent", response.conversation);
+                // messages.value = response.conversation.messages;
+            },
+        });
+
+        form.reset("message");
+        adjustTextareaHeight();
+    } catch (error) {
+        console.error("Error sending message:", error);
+        // Remove the temporary message if there's an error
+        messages.value = messages.value.filter((m) => m !== newMessage);
+    }
+    form.processing = false;
+};
+
+const copyToClipboard = async (text) => {
+    try {
+        if (!navigator.clipboard) {
+            // Fallback for older browsers
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand("copy");
+                isCopied.value = true;
+                setTimeout(() => (isCopied.value = false), 1000);
+            } catch (err) {
+                console.error("Fallback: Impossible de copier le texte", err);
+            }
+            document.body.removeChild(textArea);
+            return;
         }
-    });
+
+        await navigator.clipboard.writeText(text);
+        isCopied.value = true;
+        setTimeout(() => (isCopied.value = false), 1000);
+    } catch (err) {
+        console.error("Failed to copy text: ", err);
+    }
+};
+
+const clearChat = () => {
+    messages.value = [];
+    form.conversation_id = null;
+};
+
+// Add clearChat to expose it to the parent component
+defineExpose({ clearChat });
+
+const handleModelChange = () => {
+    emit("selected-model", form.model);
 };
 
 watch(
     () => props.conversation,
     (newConversation) => {
         if (newConversation) {
+            console.log(newConversation);
             messages.value = newConversation.messages;
             form.conversation_id = newConversation.id;
+            // Update the model selector with the conversation's model
+            form.model = props.models.find(
+                (m) => m.id === newConversation.model_id
+            );
+            emit("selected-model", form.model);
             scrollToBottom();
         }
     },
