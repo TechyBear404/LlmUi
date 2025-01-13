@@ -5,9 +5,11 @@
                 class="border-r border-gray-700 w-80"
                 :conversations="conversations"
                 :selectedId="currentConversation?.id"
+                :loading="false"
+                :defaultModel="DEFAULT_MODEL"
                 @select="selectConversation"
                 @delete="deleteConversation"
-                @new-conversation="setNewConversation"
+                @conversation-created="handleNewConversation"
             />
             <Chat
                 ref="chatComponent"
@@ -15,6 +17,7 @@
                 :models="models"
                 :conversation="currentConversation"
                 :flash="flash"
+                :defaultModel="DEFAULT_MODEL"
                 @selected-model="setCurrentModel"
             />
         </div>
@@ -29,6 +32,11 @@ import { ref, onMounted, watch } from "vue";
 import axios from "axios";
 import { useForm } from "@inertiajs/vue3";
 
+const DEFAULT_MODEL = {
+    id: "meta-llama/llama-3.2-11b-vision-instruct:free",
+    name: "Meta: Llama 3.2 11B Vision Instruct (free)",
+};
+
 const props = defineProps({
     models: {
         type: Array,
@@ -36,19 +44,18 @@ const props = defineProps({
     },
     flash: {
         type: Object,
+        default: () => ({}),
     },
-    initialConversations: {
+    conversations: {
         type: Array,
-        required: true,
+        default: () => [], // Add default empty array
     },
 });
 
-const conversations = ref(
-    props.initialConversations ? props.initialConversations : []
-);
+const conversations = ref(props.conversations || []);
 const currentConversation = ref(null);
 const chatComponent = ref(null);
-const currentModel = ref(null);
+const currentModel = ref(DEFAULT_MODEL);
 console.log(conversations.value);
 
 // Add onMounted to select last conversation
@@ -72,7 +79,7 @@ watch(
 
 // Add a watch for initialConversations
 watch(
-    () => props.initialConversations,
+    () => props.conversations,
     (newConversations) => {
         if (newConversations) {
             conversations.value = newConversations;
@@ -98,25 +105,28 @@ const selectConversation = async (conversation) => {
     try {
         const response = await axios.get(`/conversations/${conversation.id}`);
         currentConversation.value = response.data;
+        currentModel.value =
+            props.models.find((m) => m.id === response.data.model_id) ||
+            DEFAULT_MODEL;
     } catch (error) {
         console.error("Error fetching conversation:", error);
     }
 };
 
+const deleteForm = useForm({});
+
 const deleteConversation = async (id) => {
-    try {
-        await axios.delete(`/conversations/${id}`);
-        conversations.value = conversations.value.filter(
-            (conv) => conv.id !== id
-        );
-        if (currentConversation.value?.id === id) {
-            currentConversation.value = null;
-            // Clear the chat when deleting the current conversation
-            chatComponent.value?.clearChat();
-        }
-    } catch (error) {
-        console.error("Error deleting conversation:", error);
-    }
+    deleteForm.delete(route("conversations.destroy", { conversation: id }), {
+        onSuccess: () => {
+            conversations.value = conversations.value.filter(
+                (conv) => conv.id !== id
+            );
+            if (currentConversation.value?.id === id) {
+                currentConversation.value = null;
+                chatComponent.value?.clearChat();
+            }
+        },
+    });
 };
 
 // const handleMessageSent = (newConversation) => {
@@ -139,22 +149,17 @@ const newConversationForm = useForm({
     model: null,
 });
 
-const setNewConversation = async () => {
-    if (!currentModel.value) {
-        console.error("No model selected");
-        return;
-    }
-
-    newConversationForm.model = currentModel.value;
-
+const handleNewConversation = async (conversation) => {
     try {
-        newConversationForm.post("/conversations", {
-            onSuccess: (response) => {
-                console.log(response);
-            },
-        });
+        // Get the full conversation with messages
+        const response = await axios.get(`/conversations/${conversation.id}`);
+        conversations.value.unshift(conversation);
+        currentConversation.value = response.data;
+        currentModel.value =
+            props.models.find((m) => m.id === response.data.model_id) ||
+            DEFAULT_MODEL;
     } catch (error) {
-        console.error("Error creating conversation:", error);
+        console.error("Error loading new conversation:", error);
     }
 };
 </script>

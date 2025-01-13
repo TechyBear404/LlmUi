@@ -67,7 +67,10 @@ class ConversationController extends Controller
                 'model' => $validatedData['model']
             ]);
 
-            return redirect()->back()->with('conversation', $conversation);
+            return back()->with([
+                'conversation' => $conversation,
+                'message' => 'Conversation created successfully'
+            ]);
         } catch (\Exception $e) {
             logger()->error('Error creating conversation:', [
                 'message' => $e->getMessage(),
@@ -75,97 +78,35 @@ class ConversationController extends Controller
                 'user_id' => Auth::id()
             ]);
 
-            return redirect()->back()->with('error', 'Erreur: ' . $e->getMessage());
+            return back()->withErrors(['error' => $e->getMessage()]);
         }
     }
 
-    public function addMessage(Request $request, Conversation $conversation)
+
+
+    public function updateModel(Request $request, Conversation $conversation)
     {
-        dd($request->all());
         try {
-            logger()->info('Adding message to conversation', [
-                'conversation_id' => $conversation->id,
-                'user_id' => Auth::id(),
-            ]);
-
             $validatedData = $request->validate([
-                'message' => 'required|string',
                 'model' => 'required|array',
+                'model.id' => 'required|string',
+                'model.name' => 'required|string',
             ]);
 
-            if ($request->model->id !== Auth::user()->model_id) {
-                $user = User::find(Auth::id());
-                $user->update([
-                    'model_id' => $request->model->id,
-                    'model_name' => $request->model->name,
-                ]);
-            }
-            // Store user message
-            $userMessage = $conversation->messages()->create([
-                'content' => $validatedData['message'],
-                'role' => 'user',
+            $conversation->update([
+                'model_id' => $validatedData['model']['id'],
+                'model_name' => $validatedData['model']['name'],
             ]);
 
-            // Get conversation history
-            $messageHistory = $conversation->messages()
-                ->orderBy('created_at', 'asc')
-                ->get()
-                ->map(function ($message) {
-                    return [
-                        'role' => $message->role,
-                        'content' => $message->content,
-                    ];
-                })
-                ->toArray();
-
-            try {
-                $aiResponse = $this->chatService->sendMessage(
-                    $messageHistory,
-                    $validatedData['model']
-                );
-
-                // Store AI response
-                $conversation->messages()->create([
-                    'content' => $aiResponse,
-                    'role' => 'assistant',
-                ]);
-
-                // Generate title if this is the first message
-                if ($conversation->messages()->count() <= 2) {
-                    $title = $this->chatService->makeTitle($validatedData['message'], $validatedData['model']);
-                    $conversation->update(['title' => $title]);
-                }
-
-                $conversation->touch();
-
-                logger()->info('Message added successfully', [
-                    'conversation_id' => $conversation->id,
-                    'message_count' => $conversation->messages()->count()
-                ]);
-
-                return response()->json([
-                    'conversation' => $conversation->load('messages'),
-                    'message' => 'Message added successfully'
-                ]);
-            } catch (\Exception $e) {
-                logger()->error('Error adding message:', [
-                    'conversation_id' => $conversation->id,
-                    'message' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString()
-                ]);
-                return response()->json([
-                    'error' => $e->getMessage()
-                ], 500);
-            }
+            return back()->with([
+                'conversation' => $conversation->load('messages')
+            ]);
         } catch (\Exception $e) {
-            logger()->error('Error adding message:', [
+            logger()->error('Error updating conversation model:', [
                 'conversation_id' => $conversation->id,
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            return response()->json([
                 'error' => $e->getMessage()
-            ], 500);
+            ]);
+            return back()->withErrors(['error' => $e->getMessage()]);
         }
     }
 
@@ -174,6 +115,6 @@ class ConversationController extends Controller
         $conversation->messages()->delete();
         $conversation->delete();
 
-        return response()->json(['message' => 'Conversation deleted successfully']);
+        return back()->with(['message' => 'Conversation deleted successfully']);
     }
 }

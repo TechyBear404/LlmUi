@@ -1,21 +1,44 @@
 <template>
     <div class="flex flex-col h-full bg-slate-900">
-        <div class="p-4 border-b border-gray-700">
-            <h2 class="text-xl font-semibold text-gray-200">Conversations</h2>
+        <div class="flex-none p-4">
+            <button
+                @click="createNewConversation"
+                class="flex items-center justify-center w-full gap-2 px-4 py-2 text-white transition-colors rounded-lg bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800"
+            >
+                <font-awesome-icon icon="fa-solid fa-plus" />
+                <span>Nouvelle conversation</span>
+            </button>
         </div>
-        <div class="flex-grow overflow-y-auto">
-            <div class="flex flex-col p-2 space-y-1">
-                <!-- New Conversation Button -->
-                <button
-                    @click="createNewConversation"
-                    class="flex items-center p-3 space-x-3 text-gray-300 transition-colors rounded-lg cursor-pointer hover:bg-gray-800"
-                >
-                    <font-awesome-icon icon="fa-solid fa-plus" />
-                    <span>Nouvelle conversation</span>
-                </button>
 
+        <!-- Loading state -->
+        <div v-if="loading" class="flex items-center justify-center flex-1">
+            <font-awesome-icon
+                icon="fa-solid fa-circle-notch"
+                class="text-4xl text-gray-600 animate-spin"
+            />
+        </div>
+
+        <!-- Empty state -->
+        <div
+            v-else-if="!props.conversations.length"
+            class="flex items-center justify-center flex-1 p-4 text-gray-500"
+        >
+            <div class="text-center">
+                <font-awesome-icon
+                    icon="fa-solid fa-comments"
+                    class="mb-2 text-4xl"
+                />
+                <p>No conversations yet</p>
+            </div>
+        </div>
+
+        <!-- Conversations list -->
+        <div v-else class="flex-grow overflow-y-auto">
+            <div class="flex flex-col p-2 space-y-1">
                 <div
-                    v-if="props.conversations.length === 0"
+                    v-if="
+                        props.conversations && props.conversations.length === 0
+                    "
                     class="p-4 text-center text-gray-400"
                 >
                     Aucune conversation.
@@ -59,17 +82,36 @@
 
 <script setup>
 import { formatDateTime } from "@/Lib/utils";
+import { useForm } from "@inertiajs/vue3";
+import axios from "axios";
 
-const emit = defineEmits(["select", "delete", "new-conversation"]);
+const emit = defineEmits(["select", "delete", "conversation-created"]);
 const props = defineProps({
     conversations: {
         type: Array,
         required: true,
+        default: () => [],
     },
     selectedId: {
-        type: Number,
+        type: [String, Number],
         default: null,
     },
+    loading: {
+        type: Boolean,
+        default: false,
+    },
+    defaultModel: {
+        type: Object,
+        default: () => ({}),
+    },
+});
+
+const form = useForm({
+    model: props.defaultModel,
+});
+
+const conversationForm = useForm({
+    model: props.defaultModel,
 });
 
 const selectConversation = (conversation) => {
@@ -80,8 +122,13 @@ const deleteConversation = (id) => {
     emit("delete", id);
 };
 
-// Add new method
 const createNewConversation = () => {
-    emit("new-conversation");
+    conversationForm.post(route("conversations.store"), {
+        onSuccess: (response) => {
+            if (response?.props?.conversation) {
+                emit("conversation-created", response.props.conversation);
+            }
+        },
+    });
 };
 </script>

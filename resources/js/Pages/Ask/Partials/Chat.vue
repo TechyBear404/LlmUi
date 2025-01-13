@@ -6,15 +6,18 @@
         >
             <div class="flex items-center justify-center">
                 <select
-                    v-model="form.model"
+                    v-model="modelForm.model"
                     name="model"
-                    class="w-full max-w-xs px-3 py-2 text-gray-200 bg-gray-700 border border-gray-600 rounded-md focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                    :disabled="modelForm.processing"
+                    class="w-full max-w-xs px-3 py-2 text-gray-200 bg-gray-700 border border-gray-600 rounded-md focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     @change="handleModelChange"
                 >
+                    <option value="">Select a model</option>
                     <option
-                        v-for="(model, id) in models"
+                        v-for="model in models"
                         :key="model.id"
                         :value="model"
+                        :selected="model.id === modelForm.model?.id"
                     >
                         {{ model.name }}
                     </option>
@@ -22,8 +25,24 @@
             </div>
         </div>
 
+        <!-- Empty state when no conversation exists -->
+        <div
+            v-if="!props.conversation"
+            class="flex items-center justify-center flex-1 text-gray-400"
+        >
+            <div class="space-y-4 text-center">
+                <font-awesome-icon
+                    icon="fa-solid fa-comments"
+                    class="text-6xl"
+                />
+                <p class="text-lg">
+                    Select or create a conversation to start chatting
+                </p>
+            </div>
+        </div>
+
         <!-- Chat messages area -->
-        <div class="flex-1 w-full overflow-hidden">
+        <div v-else class="flex-1 w-full overflow-hidden">
             <div ref="messageContainer" class="h-full overflow-y-auto">
                 <div class="max-w-4xl p-4 mx-auto">
                     <div
@@ -142,9 +161,12 @@
             class="flex-none border-t border-slate-800 bg-gradient-to-t from-slate-900 to-slate-950"
         >
             <div class="p-4">
-                <form class="flex gap-4" @submit.prevent="sendMessage">
+                <form
+                    class="flex gap-4"
+                    @submit.prevent="sendMessageToConversation"
+                >
                     <textarea
-                        v-model="form.message"
+                        v-model="messageForm.message"
                         rows="1"
                         ref="messageInput"
                         placeholder="Envoyer un message..."
@@ -154,12 +176,16 @@
                     ></textarea>
                     <button
                         type="submit"
-                        :disabled="form.processing"
+                        :disabled="
+                            !props.conversation || messageForm.processing
+                        "
                         class="px-4 py-2 h-[44px] text-white bg-purple-600 rounded-lg hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 focus:ring-offset-gray-800"
-                        :class="{ 'cursor-not-allowed': form.processing }"
-                        @click.prevent="sendMessage"
+                        :class="{
+                            'cursor-not-allowed': messageForm.processing,
+                        }"
+                        @click.prevent="sendMessageToConversation"
                     >
-                        <span v-if="form.processing">
+                        <span v-if="messageForm.processing">
                             <svg
                                 class="text-gray-300 animate-spin"
                                 viewBox="0 0 64 64"
@@ -200,12 +226,12 @@ import MarkdownIt from "markdown-it";
 import hljs from "highlight.js";
 import "highlight.js/styles/github-dark.css";
 import { formatDateTime } from "@/Lib/utils";
+import { router } from "@inertiajs/vue3";
 
 const props = defineProps({
     models: {
         type: Array,
         required: true,
-        default: () => ({}),
     },
     flash: {
         type: Object,
@@ -216,22 +242,37 @@ const props = defineProps({
         required: false,
         default: null,
     },
+    defaultModel: {
+        type: Object,
+        required: true,
+    },
 });
 
 // Initialize messages as an empty array
 const messages = ref([]);
 
-const form = useForm({
+// Initialize form with the appropriate model
+const messageForm = useForm({
     message: "",
-    model: null,
-    conversation_id: null,
+    model: props.defaultModel,
+    conversation_id: props.conversation?.id,
+});
+
+const modelForm = useForm({
+    model: props.conversation?.model_id
+        ? props.models.find((m) => m.id === props.conversation.model_id)
+        : props.defaultModel,
 });
 
 const messageContainer = ref(null);
 const messageInput = ref(null);
 const isCopied = ref(false);
 
-const emit = defineEmits(["message-sent", "selected-model"]);
+const emit = defineEmits([
+    "message-sent",
+    "selected-model",
+    "conversation-created",
+]);
 
 // Configure markdown-it with syntax highlighting
 const md = new MarkdownIt({
@@ -284,46 +325,58 @@ const adjustTextareaHeight = () => {
     textarea.style.height = `${newHeight}px`;
 };
 
-const sendMessage = async () => {
-    if (!form.message) return;
+const sendMessageToConversation = () => {
+    console.log("Starting sendMessageToConversation");
 
-    form.processing = true;
+    if (
+        !props.conversation?.id ||
+        !messageForm.message ||
+        messageForm.processing
+    ) {
+        console.log("Validation failed:", {
+            hasConversation: !!props.conversation?.id,
+            hasMessage: !!messageForm.message,
+            isProcessing: messageForm.processing,
+        });
+        return;
+    }
 
-    // Create a new message object
-    const newMessage = {
+    messageForm.processing = true;
+
+    // Create temporary message for optimistic UI
+    const tempMessage = {
         role: "user",
-        content: form.message,
+        content: messageForm.message,
         updated_at: new Date().toISOString(),
     };
 
-    // Ensure messages is an array before pushing
-    if (!Array.isArray(messages.value)) {
-        messages.value = [];
+    if (Array.isArray(messages.value)) {
+        messages.value.push(tempMessage);
+        scrollToBottom();
+    } else {
+        messages.value = [tempMessage];
     }
 
-    messages.value.push(newMessage);
-    scrollToBottom();
-
-    const endpoint = `/conversations/${props.conversation.id}/messages`;
-
-    try {
-        form.post(route("ask.post"), {
-            preserveScroll: true,
-            onSuccess: (response) => {
-                console.log(response);
-                // emit("message-sent", response.conversation);
-                // messages.value = response.conversation.messages;
-            },
-        });
-
-        form.reset("message");
-        adjustTextareaHeight();
-    } catch (error) {
-        console.error("Error sending message:", error);
-        // Remove the temporary message if there's an error
-        messages.value = messages.value.filter((m) => m !== newMessage);
-    }
-    form.processing = false;
+    // Correctly structure the data for the request
+    messageForm.post(route("ask.post"), {
+        preserveScroll: true,
+        onSuccess: (response) => {
+            console.log("Request successful:", response);
+            if (response?.props?.conversation?.messages) {
+                messages.value = response.props.conversation.messages;
+            }
+            messageForm.reset("message");
+            adjustTextareaHeight();
+            scrollToBottom();
+        },
+        onError: (errors) => {
+            console.error("Request failed with errors:", errors);
+            messages.value = messages.value.filter((m) => m !== tempMessage);
+        },
+        onFinish: () => {
+            messageForm.processing = false;
+        },
+    });
 };
 
 const copyToClipboard = async (text) => {
@@ -362,23 +415,45 @@ const clearChat = () => {
 defineExpose({ clearChat });
 
 const handleModelChange = () => {
-    emit("selected-model", form.model);
+    if (!props.conversation) {
+        return;
+    }
+
+    modelForm.put(
+        route("conversations.model.update", {
+            conversation: props.conversation.id,
+        }),
+        {
+            preserveScroll: true,
+            onSuccess: (response) => {
+                if (response?.props?.conversation) {
+                    messages.value = response.props.conversation.messages;
+                    emit("selected-model", modelForm.model);
+                }
+            },
+        }
+    );
 };
 
+// Update the watch handler for the conversation to properly handle model selection
 watch(
     () => props.conversation,
     (newConversation) => {
+        messages.value = newConversation?.messages || [];
+
         if (newConversation) {
-            console.log(newConversation);
-            messages.value = newConversation.messages;
-            form.conversation_id = newConversation.id;
-            // Update the model selector with the conversation's model
-            form.model = props.models.find(
+            const conversationModel = props.models.find(
                 (m) => m.id === newConversation.model_id
             );
-            emit("selected-model", form.model);
-            scrollToBottom();
+            if (conversationModel) {
+                modelForm.model = conversationModel;
+            }
+        } else {
+            modelForm.model = props.defaultModel;
         }
+
+        emit("selected-model", modelForm.model);
+        scrollToBottom();
     },
     { immediate: true }
 );
