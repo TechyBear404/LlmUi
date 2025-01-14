@@ -23,13 +23,7 @@ class ConversationController extends Controller
     {
         $conversations = auth()->user()->conversations()
             ->with(['messages' => function ($query) {
-                $query->orderBy('created_at', 'desc');
-            }])
-            ->orderBy('updated_at', 'desc')
-            ->get();
-        $conversations = Conversation::where('user_id', Auth::id())
-            ->with(['messages' => function ($query) {
-                $query->orderBy('created_at', 'desc');
+                $query->orderBy('created_at', 'asc'); // Changed to ascending order
             }])
             ->orderBy('updated_at', 'desc')
             ->get();
@@ -39,8 +33,13 @@ class ConversationController extends Controller
 
     public function show(Conversation $conversation)
     {
+        // Check if user owns the conversation
+        if ($conversation->user_id !== Auth::id()) {
+            abort(403);
+        }
+
         $conversation->load(['messages' => function ($query) {
-            $query->orderBy('created_at', 'asc');
+            $query->orderBy('created_at', 'asc'); // Keep ascending order for consistency
         }]);
 
         return response()->json($conversation);

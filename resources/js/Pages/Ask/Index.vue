@@ -7,7 +7,6 @@
                 :selectedId="currentConversation?.id"
                 :currentModel="currentModel"
                 @select="selectConversation"
-                @delete="deleteConversation"
             />
             <div class="flex flex-col flex-grow w-full">
                 <ModelsSelector
@@ -74,42 +73,20 @@ watch(
     () => props.flash?.conversation,
     (newConversation) => {
         if (newConversation) {
-            currentConversation.value = newConversation;
+            selectConversation(newConversation);
         }
-    }
+    },
+    { immediate: true }
 );
 
-watch(
-    () => props.initialConversations,
-    (newConversations) => {
-        conversations.value = newConversations;
+const selectConversation = (conversation) => {
+    currentConversation.value = conversation;
+    if (conversation?.model) {
+        currentModel.value = {
+            id: conversation.model_id,
+            name: conversation.model_name,
+        };
     }
-);
-
-const selectConversation = async (conversation) => {
-    try {
-        const response = await axios.get(`/conversations/${conversation.id}`);
-        console.log("Selected conversation:", response.data);
-        currentConversation.value = response.data;
-    } catch (error) {
-        console.error("Error fetching conversation:", error);
-    }
-};
-
-const deleteConversation = async (id) => {
-    // try {
-    //     await axios.delete(`/conversations/${id}`);
-    //     conversations.value = conversations.value.filter(
-    //         (conv) => conv.id !== id
-    //     );
-    //     if (currentConversation.value?.id === id) {
-    //         currentConversation.value = null;
-    //         // Clear the chat when deleting the current conversation
-    //         chatComponent.value?.clearChat();
-    //     }
-    // } catch (error) {
-    //     console.error("Error deleting conversation:", error);
-    // }
 };
 
 const handleModelChange = (model) => {

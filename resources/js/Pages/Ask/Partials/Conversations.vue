@@ -36,13 +36,13 @@
         <div v-else class="flex-grow overflow-y-auto">
             <div class="flex flex-col p-2 space-y-1">
                 <div
-                    v-if="conversations.length === 0"
+                    v-if="sortedConversations.length === 0"
                     class="p-4 text-center text-gray-400"
                 >
                     Aucune conversation.
                 </div>
                 <div
-                    v-for="conversation in conversations"
+                    v-for="conversation in sortedConversations"
                     :key="conversation.id"
                     @click="selectConversation(conversation)"
                     class="flex items-center justify-between p-3 transition-colors rounded-lg cursor-pointer group"
@@ -89,7 +89,7 @@
 import { formatDateTime } from "@/Lib/utils";
 import { useForm } from "@inertiajs/vue3";
 import axios from "axios";
-import { ref, watch } from "vue";
+import { ref, watch, computed } from "vue";
 
 const emit = defineEmits(["select", "delete", "conversation-created"]);
 const props = defineProps({
@@ -121,6 +121,13 @@ watch(
     }
 );
 
+watch(
+    () => props.selectedId,
+    (newSelectedId) => {
+        console.log("Selected conversation changed", newSelectedId);
+    }
+);
+
 const form = useForm({
     model: props.defaultModel,
 });
@@ -130,16 +137,16 @@ const conversationForm = useForm({
 });
 
 const deleteForm = useForm({});
-const fetchForm = useForm({});
 
-const selectConversation = (conversation) => {
-    fetchForm.get(route("conversations.show", conversation.id), {
-        preserveScroll: true,
-        preserveState: true,
-        onSuccess: () => {
-            emit("select", conversation);
-        },
-    });
+const selectConversation = async (conversation) => {
+    try {
+        const response = await axios.get(
+            route("conversations.show", conversation.id)
+        );
+        emit("select", response.data);
+    } catch (error) {
+        console.error("Error fetching conversation:", error);
+    }
 };
 
 const deleteConversation = (conversation) => {
@@ -149,7 +156,7 @@ const deleteConversation = (conversation) => {
             conversations.value = conversations.value.filter(
                 (c) => c.id !== conversation.id
             );
-            emit("delete", conversation.id);
+            // emit("delete", conversation.id);
         },
     });
 };
@@ -168,4 +175,16 @@ const createNewConversation = () => {
         },
     });
 };
+
+const sortedConversations = computed(() => {
+    return [...conversations.value].sort((a, b) => {
+        const aDate = a.messages?.length
+            ? new Date(a.messages[a.messages.length - 1].created_at)
+            : new Date(a.updated_at);
+        const bDate = b.messages?.length
+            ? new Date(b.messages[b.messages.length - 1].created_at)
+            : new Date(b.updated_at);
+        return bDate - aDate;
+    });
+});
 </script>
