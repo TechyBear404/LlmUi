@@ -117,13 +117,13 @@ class ChatService
         }
     }
 
-    public function makeTitle(string $message, string $model): string
+    public function makeTitle(string $messages, string $model): string
     {
         try {
             $messages = [
                 [
                     'role' => 'user',
-                    'content' => $message
+                    'content' => $messages
                 ]
             ];
 
@@ -170,10 +170,14 @@ class ChatService
         return [
             'role' => 'system',
             'content' => <<<EOT
-                Tu es un assistant
-                Ton travail est de crée des titre de conversation a partir de message d'ouverture
-                Le titre doit etre clair et concis
-                Le titre ne doit pas depasser 10 mots
+                Tu es un assistant spécialisé dans la création de titres de conversation.
+                Ton travail consiste à créer un titre à partir d’un message d’ouverture (question) et de la réponse associée.
+                Le titre doit respecter les consignes suivantes :
+                1. Il doit être clair, concis et refléter fidèlement le contenu de la question et de la réponse.
+                2. Il ne doit pas dépasser 10 mots.
+                3. Il doit attirer l’attention tout en restant informatif.
+                4. Évite les répétitions inutiles et privilégie des termes spécifiques et évocateurs.
+                5. Si possible, utilise un ton neutre et objectif.
                 EOT,
         ];
     }

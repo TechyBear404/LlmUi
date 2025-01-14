@@ -48,6 +48,7 @@ class ConversationController extends Controller
 
     public function store(Request $request)
     {
+        // dd($request->all());
         try {
             $validatedData = $request->validate([
                 'model' => 'required|array',
@@ -67,10 +68,7 @@ class ConversationController extends Controller
                 'model' => $validatedData['model']
             ]);
 
-            return back()->with([
-                'conversation' => $conversation,
-                'message' => 'Conversation created successfully'
-            ]);
+            return redirect()->back()->with('success', 'Conversation created successfully')->with('conversation', $conversation);
         } catch (\Exception $e) {
             logger()->error('Error creating conversation:', [
                 'message' => $e->getMessage(),

@@ -1,30 +1,5 @@
 <template>
     <div class="flex flex-col h-full bg-slate-950">
-        <!-- Header with model selector -->
-        <div
-            class="flex-none p-4 bg-gray-800 border-b border-gray-700 shadow-sm"
-        >
-            <div class="flex items-center justify-center">
-                <select
-                    v-model="modelForm.model"
-                    name="model"
-                    :disabled="modelForm.processing"
-                    class="w-full max-w-xs px-3 py-2 text-gray-200 bg-gray-700 border border-gray-600 rounded-md focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                    @change="handleModelChange"
-                >
-                    <option value="">Select a model</option>
-                    <option
-                        v-for="model in models"
-                        :key="model.id"
-                        :value="model"
-                        :selected="model.id === modelForm.model?.id"
-                    >
-                        {{ model.name }}
-                    </option>
-                </select>
-            </div>
-        </div>
-
         <!-- Empty state when no conversation exists -->
         <div
             v-if="!props.conversation"
@@ -171,7 +146,7 @@
                         ref="messageInput"
                         placeholder="Envoyer un message..."
                         class="flex-1 p-3 overflow-y-auto transition-all duration-200 border resize-none text-slate-100 placeholder-slate-400 bg-slate-800 border-slate-700 rounded-xl focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/10 focus:outline-none textarea-scroll"
-                        @keydown.enter.exact.prevent="sendMessage"
+                        @keydown="handleKeyDown"
                         @input="adjustTextareaHeight"
                     ></textarea>
                     <button
@@ -226,27 +201,23 @@ import MarkdownIt from "markdown-it";
 import hljs from "highlight.js";
 import "highlight.js/styles/github-dark.css";
 import { formatDateTime } from "@/Lib/utils";
-import { router } from "@inertiajs/vue3";
 
 const props = defineProps({
-    models: {
-        type: Array,
-        required: true,
-    },
     flash: {
         type: Object,
         default: () => ({}),
     },
     conversation: {
         type: Object,
-        required: false,
-        default: null,
+        required: true,
     },
-    defaultModel: {
+    currentModel: {
         type: Object,
         required: true,
     },
 });
+
+console.log(props.conversation);
 
 // Initialize messages as an empty array
 const messages = ref([]);
@@ -254,15 +225,11 @@ const messages = ref([]);
 // Initialize form with the appropriate model
 const messageForm = useForm({
     message: "",
-    model: props.defaultModel,
+    model: props.currentModel,
     conversation_id: props.conversation?.id,
 });
 
-const modelForm = useForm({
-    model: props.conversation?.model_id
-        ? props.models.find((m) => m.id === props.conversation.model_id)
-        : props.defaultModel,
-});
+console.log("Conversations", props.conversation_id);
 
 const messageContainer = ref(null);
 const messageInput = ref(null);
@@ -409,31 +376,11 @@ const copyToClipboard = async (text) => {
 const clearChat = () => {
     messages.value = [];
     form.conversation_id = null;
+    form.model = props.defaultModel;
 };
 
 // Add clearChat to expose it to the parent component
 defineExpose({ clearChat });
-
-const handleModelChange = () => {
-    if (!props.conversation) {
-        return;
-    }
-
-    modelForm.put(
-        route("conversations.model.update", {
-            conversation: props.conversation.id,
-        }),
-        {
-            preserveScroll: true,
-            onSuccess: (response) => {
-                if (response?.props?.conversation) {
-                    messages.value = response.props.conversation.messages;
-                    emit("selected-model", modelForm.model);
-                }
-            },
-        }
-    );
-};
 
 // Update the watch handler for the conversation to properly handle model selection
 watch(
@@ -441,22 +388,17 @@ watch(
     (newConversation) => {
         messages.value = newConversation?.messages || [];
 
-        if (newConversation) {
-            const conversationModel = props.models.find(
-                (m) => m.id === newConversation.model_id
-            );
-            if (conversationModel) {
-                modelForm.model = conversationModel;
-            }
-        } else {
-            modelForm.model = props.defaultModel;
-        }
-
-        emit("selected-model", modelForm.model);
         scrollToBottom();
     },
     { immediate: true }
 );
+
+const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessageToConversation();
+    }
+};
 
 onMounted(() => {
     scrollToBottom();

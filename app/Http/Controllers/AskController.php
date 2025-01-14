@@ -25,6 +25,7 @@ class AskController extends Controller
 
     public function ask(Request $request)
     {
+        dd($request->all());
         try {
             $validatedData = $request->validate([
                 'conversation_id' => 'required|exists:conversations,id',
@@ -67,8 +68,8 @@ class AskController extends Controller
             // Update title if this is the first message
             if ($conversation->messages()->count() <= 2) {
                 $title = (new ChatService())->makeTitle(
-                    $validatedData['message'],
-                    $validatedData['model']['id']
+                    messages: $validatedData['message'],
+                    model: $validatedData['model']['id']
                 );
                 $conversation->update(['title' => $title]);
             }

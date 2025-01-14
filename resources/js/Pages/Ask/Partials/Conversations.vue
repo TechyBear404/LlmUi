@@ -36,18 +36,16 @@
         <div v-else class="flex-grow overflow-y-auto">
             <div class="flex flex-col p-2 space-y-1">
                 <div
-                    v-if="
-                        props.conversations && props.conversations.length === 0
-                    "
+                    v-if="conversations.length === 0"
                     class="p-4 text-center text-gray-400"
                 >
                     Aucune conversation.
                 </div>
                 <div
-                    v-for="conversation in props.conversations"
+                    v-for="conversation in conversations"
                     :key="conversation.id"
                     @click="selectConversation(conversation)"
-                    class="flex items-center p-3 transition-colors rounded-lg cursor-pointer"
+                    class="flex items-center justify-between p-3 transition-colors rounded-lg cursor-pointer group"
                     :class="[
                         conversation.id === selectedId
                             ? 'bg-purple-600 text-white'
@@ -68,11 +66,18 @@
                         </div>
                     </div>
                     <button
-                        v-if="conversation.id === selectedId"
-                        @click.stop="deleteConversation(conversation.id)"
-                        class="ml-auto text-gray-300 hover:text-red-500"
+                        @click.stop="deleteConversation(conversation)"
+                        class="hidden text-gray-300 group-hover:block hover:text-red-500"
+                        :disabled="deleteForm.processing"
                     >
-                        <font-awesome-icon icon="fa-solid fa-trash" />
+                        <font-awesome-icon
+                            :icon="
+                                deleteForm.processing
+                                    ? 'fa-solid fa-circle-notch'
+                                    : 'fa-solid fa-trash'
+                            "
+                            :class="{ 'animate-spin': deleteForm.processing }"
+                        />
                     </button>
                 </div>
             </div>
@@ -84,13 +89,13 @@
 import { formatDateTime } from "@/Lib/utils";
 import { useForm } from "@inertiajs/vue3";
 import axios from "axios";
+import { ref, watch } from "vue";
 
 const emit = defineEmits(["select", "delete", "conversation-created"]);
 const props = defineProps({
     conversations: {
         type: Array,
         required: true,
-        default: () => [],
     },
     selectedId: {
         type: [String, Number],
@@ -100,33 +105,65 @@ const props = defineProps({
         type: Boolean,
         default: false,
     },
-    defaultModel: {
+    currentModel: {
         type: Object,
-        default: () => ({}),
     },
 });
+
+const conversations = ref(props.conversations);
+
+// Watch for changes in props.conversations and update the ref
+watch(
+    () => props.conversations,
+    (newConversations) => {
+        console.log("Conversations updated", newConversations);
+        conversations.value = newConversations;
+    }
+);
 
 const form = useForm({
     model: props.defaultModel,
 });
 
 const conversationForm = useForm({
-    model: props.defaultModel,
+    model: props.currentModel,
 });
 
+const deleteForm = useForm({});
+const fetchForm = useForm({});
+
 const selectConversation = (conversation) => {
-    emit("select", conversation);
+    fetchForm.get(route("conversations.show", conversation.id), {
+        preserveScroll: true,
+        preserveState: true,
+        onSuccess: () => {
+            emit("select", conversation);
+        },
+    });
 };
 
-const deleteConversation = (id) => {
-    emit("delete", id);
+const deleteConversation = (conversation) => {
+    deleteForm.delete(route("conversations.destroy", conversation.id), {
+        preserveScroll: true,
+        onSuccess: () => {
+            conversations.value = conversations.value.filter(
+                (c) => c.id !== conversation.id
+            );
+            emit("delete", conversation.id);
+        },
+    });
 };
 
 const createNewConversation = () => {
     conversationForm.post(route("conversations.store"), {
-        onSuccess: (response) => {
-            if (response?.props?.conversation) {
-                emit("conversation-created", response.props.conversation);
+        onSuccess: (page) => {
+            const newConversation = page.props.flash.conversation;
+            if (newConversation) {
+                // Create a new array with the new conversation
+                conversations.value = [...conversations.value, newConversation];
+                // Automatically select the new conversation
+                selectConversation(newConversation);
+                emit("conversation-created", newConversation);
             }
         },
     });
