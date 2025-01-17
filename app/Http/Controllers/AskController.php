@@ -6,36 +6,51 @@ use App\Models\Conversation;
 use App\Services\ChatService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 
 class AskController extends Controller
 {
+    protected $chatService;
+
+    public function __construct(ChatService $chatService)
+    {
+        $this->chatService = $chatService;
+    }
+
     public function index()
     {
+        $conversations = auth()->user()->conversations()
+            ->with(['messages' => function ($query) {
+                $query->orderBy('created_at', 'asc');
+            }, 'customInstruction']) // Add customInstruction eager loading
+            ->orderBy('updated_at', 'desc')
+            ->get();
+
+        $customInstructions = auth()->user()->customInstructions()
+            ->orderBy('created_at', 'desc')
+            ->get();
+
         return Inertia::render('Ask/Index', [
             'models' => (new ChatService())->getModels(),
-            'conversations' => auth()->user()->conversations()
-                ->with(['messages' => function ($query) {
-                    $query->orderBy('created_at', 'desc');
-                }])
-                ->orderBy('updated_at', 'desc')
-                ->get() ?? [],
+            'conversations' => $conversations,
+            'customInstructions' => $customInstructions,
         ]);
     }
 
     public function ask(Request $request)
     {
-        // dd($request->all());
         try {
             $validatedData = $request->validate([
                 'conversation_id' => 'required|exists:conversations,id',
                 'message' => 'required|string',
                 'model' => 'required|array',
                 'model.id' => 'required|string',
-                'model.name' => 'required|string',
             ]);
 
-            $conversation = Conversation::findOrFail($validatedData['conversation_id']);
+            // Add eager loading for customInstruction
+            $conversation = Conversation::with(['customInstruction', 'messages'])
+                ->findOrFail($validatedData['conversation_id']);
 
             // Store user message
             $conversation->messages()->create([
@@ -43,19 +58,9 @@ class AskController extends Controller
                 'role' => 'user',
             ]);
 
-            // Get conversation history
-            $messageHistory = $conversation->messages()
-                ->orderBy('created_at', 'asc')
-                ->get()
-                ->map(fn($message) => [
-                    'role' => $message->role,
-                    'content' => $message->content,
-                ])
-                ->toArray();
-
-            // Get AI response
-            $response = (new ChatService())->sendMessage(
-                messages: $messageHistory,
+            // Get AI response using conversation directly
+            $response = $this->chatService->sendMessage(
+                conversation: $conversation,
                 model: $validatedData['model']['id']
             );
 
@@ -67,24 +72,20 @@ class AskController extends Controller
 
             // Update title if this is the first message
             if ($conversation->messages()->count() <= 2) {
-                $title = (new ChatService())->makeTitle(
-                    messages: $validatedData['message'],
-                    model: $validatedData['model']['id']
+                $title = $this->chatService->makeTitle(
+                    $validatedData['message'],
+                    $validatedData['model']['id']
                 );
                 $conversation->update(['title' => $title]);
             }
 
             $conversation->touch();
+            // Make sure to include customInstruction in fresh
+            $freshConversation = $conversation->fresh(['messages', 'customInstruction']);
 
-            return back()->with([
-                'conversation' => $conversation->fresh()->load('messages'),
-            ]);
+            return back()->with('conversation', $freshConversation);
         } catch (\Exception $e) {
-            logger()->error('Error in ask:', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'request_data' => $request->all() // Add this for debugging
-            ]);
+
             return back()->withErrors(['error' => $e->getMessage()]);
         }
     }

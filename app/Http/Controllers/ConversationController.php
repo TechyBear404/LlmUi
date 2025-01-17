@@ -9,6 +9,7 @@ use App\Services\ChatService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
+use Illuminate\Support\Facades\Log;
 
 class ConversationController extends Controller
 {
@@ -47,8 +48,9 @@ class ConversationController extends Controller
 
     public function store(Request $request)
     {
-        // dd($request->all());
         try {
+            // Log::info('Creating new conversation:', $request->all());
+
             $validatedData = $request->validate([
                 'model' => 'required|array',
                 'model.id' => 'required|string',
@@ -62,28 +64,26 @@ class ConversationController extends Controller
                 'user_id' => Auth::id(),
             ]);
 
-            logger()->info('Empty conversation created successfully', [
-                'conversation_id' => $conversation->id,
-                'model' => $validatedData['model']
-            ]);
+            // Log::info('Conversation created:', [
+            //     'id' => $conversation->id,
+            //     'model' => $validatedData['model']
+            // ]);
 
-            return redirect()->back()->with('success', 'Conversation created successfully')->with('conversation', $conversation);
+            return back()->with('conversation', $conversation);
         } catch (\Exception $e) {
-            logger()->error('Error creating conversation:', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'user_id' => Auth::id()
-            ]);
-
+            // Log::error('Error creating conversation:', [
+            //     'error' => $e->getMessage(),
+            //     'trace' => $e->getTraceAsString()
+            // ]);
             return back()->withErrors(['error' => $e->getMessage()]);
         }
     }
 
-
-
     public function updateModel(Request $request, Conversation $conversation)
     {
         try {
+            // Log::info('Updating conversation model:', $request->all());
+
             $validatedData = $request->validate([
                 'model' => 'required|array',
                 'model.id' => 'required|string',
@@ -95,16 +95,34 @@ class ConversationController extends Controller
                 'model_name' => $validatedData['model']['name'],
             ]);
 
-            return back()->with([
-                'conversation' => $conversation->load('messages')
-            ]);
+            $conversation->load('messages');
+
+            // Log::info('Model updated successfully:', [
+            //     'conversation_id' => $conversation->id,
+            //     'new_model' => $validatedData['model']
+            // ]);
+
+            return back()->with('conversation', $conversation);
         } catch (\Exception $e) {
-            logger()->error('Error updating conversation model:', [
-                'conversation_id' => $conversation->id,
-                'error' => $e->getMessage()
-            ]);
+            // Log::error('Error updating model:', [
+            //     'error' => $e->getMessage(),
+            //     'trace' => $e->getTraceAsString()
+            // ]);
             return back()->withErrors(['error' => $e->getMessage()]);
         }
+    }
+
+    public function updateCustomInstruction(Request $request, Conversation $conversation)
+    {
+        $validated = $request->validate([
+            'custom_instruction_id' => 'nullable|exists:custom_instructions,id'
+        ]);
+
+        $conversation->update([
+            'custom_instruction_id' => $validated['custom_instruction_id']
+        ]);
+
+        return back()->with('success', 'Custom instruction updated');
     }
 
     public function destroy(Conversation $conversation)

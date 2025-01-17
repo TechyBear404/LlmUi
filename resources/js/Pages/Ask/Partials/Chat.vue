@@ -24,7 +24,7 @@
                         class="w-full space-y-6 text-white prose-pre:bg-gray-900"
                     >
                         <div
-                            v-if="flash.error"
+                            v-if="flash?.error"
                             class="p-4 text-red-400 rounded-lg bg-red-900/50"
                         >
                             {{ flash.error }}
@@ -82,21 +82,34 @@
                                     "
                                 >
                                     <div class="text-xs">
-                                        {{ formatDateTime(message.updated_at) }}
+                                        {{
+                                            message.updated_at
+                                                ? formatDateTime(
+                                                      message.updated_at
+                                                  )
+                                                : formatDateTime(
+                                                      message.created_at
+                                                  )
+                                        }}
                                     </div>
                                     <div
                                         class="flex items-center gap-1 hover:text-gray-300 hover:cursor-pointer"
                                         v-if="message.role === 'assistant'"
                                         @click="
-                                            copyToClipboard(message.content)
+                                            handleCopy(
+                                                message.content,
+                                                message.id
+                                            )
                                         "
                                     >
-                                        <span v-if="isCopied" class="text-xs"
+                                        <span
+                                            v-if="copiedStates.get(message.id)"
+                                            class="text-xs"
                                             >Copié</span
                                         >
                                         <font-awesome-icon
                                             :icon="
-                                                isCopied
+                                                copiedStates.get(message.id)
                                                     ? 'fa-solid fa-clipboard-check'
                                                     : 'fa-regular fa-clipboard'
                                             "
@@ -175,80 +188,144 @@
 </template>
 
 <script setup>
+import { ref, watch, nextTick } from "vue";
+import { formatDateTime, renderMarkdown, copyToClipboard } from "@/Lib/utils";
 import { useForm } from "@inertiajs/vue3";
-import { ref, watch, nextTick, onMounted } from "vue";
-import MarkdownIt from "markdown-it";
-import hljs from "highlight.js";
-import "highlight.js/styles/github-dark.css";
-import { formatDateTime } from "@/Lib/utils";
+
+// Remove MarkdownIt and hljs imports as they're no longer needed here
 
 const props = defineProps({
-    flash: {
-        type: Object,
-        default: () => ({}),
-    },
     conversation: {
         type: Object,
-        required: true,
+        default: null,
     },
-    currentModel: {
+    loading: Boolean,
+    flash: {
         type: Object,
-        required: true,
+        default: () => ({}), // Add this default value
     },
 });
 
-console.log(props.conversation);
+// Add textarea ref
+const textarea = ref(null);
 
-// Initialize messages as an empty array
+const emit = defineEmits(["messageSent"]);
+
 const messages = ref([]);
+const messagesContainer = ref(null);
+const textareaHeight = ref(44);
 
-// Initialize form with the appropriate model
+// Replace single isCopied with a Map to track per-message copy state
+const copiedStates = ref(new Map());
+
 const messageForm = useForm({
     message: "",
-    model: props.currentModel,
     conversation_id: props.conversation?.id,
 });
 
-console.log("Conversations", props.conversation_id);
-
-const messagesContainer = ref(null);
-const messageInput = ref(null);
-const isCopied = ref(false);
-
-const emit = defineEmits([
-    "message-sent",
-    "selected-model",
-    "conversation-created",
-]);
-
-// Configure markdown-it with syntax highlighting
-const md = new MarkdownIt({
-    highlight: function (str, lang) {
-        if (lang && hljs.getLanguage(lang)) {
-            try {
-                return `<pre class="hljs"><code>${
-                    hljs.highlight(str, { language: lang }).value
-                }</code></pre>`;
-            } catch (__) {}
+// Watch for conversation changes to update form
+watch(
+    () => props.conversation,
+    (newConv) => {
+        if (newConv) {
+            messageForm.conversation_id = newConv.id;
         }
-        return `<pre class="hljs"><code>${md.utils.escapeHtml(
-            str
-        )}</code></pre>`;
-    },
-    linkify: true,
-    breaks: true,
-});
+    }
+);
 
-// Render markdown content
-const renderMarkdown = (content) => {
-    try {
-        return md.render(content);
-    } catch (e) {
-        return content;
+// Update watch for conversation changes to be more reactive
+watch(
+    () => props.conversation?.messages,
+    (newMessages) => {
+        // console.log("7. Chat - New messages received:", newMessages);
+        if (newMessages) {
+            messages.value = [...newMessages];
+            // console.log("8. Chat - Messages updated:", messages.value);
+            scrollToBottom();
+        } else {
+            messages.value = [];
+            // console.log("9. Chat - Messages cleared");
+        }
+    },
+    { immediate: true, deep: true }
+);
+
+watch(
+    () => props.conversation?.messages,
+    (newMessages, oldMessages) => {
+        // console.log("5. Chat - Messages watch triggered");
+        // console.log("5.1 Old messages:", oldMessages);
+        // console.log("5.2 New messages:", newMessages);
+
+        if (newMessages) {
+            messages.value = [...newMessages];
+            // console.log("6. Chat - Updated local messages:", messages.value);
+            scrollToBottom();
+        } else {
+            messages.value = [];
+            // console.log("6.1 Chat - Cleared messages");
+        }
+    },
+    { immediate: true, deep: true }
+);
+
+// Add watch for immediate conversation changes
+watch(
+    () => props.conversation,
+    (newConv, oldConv) => {
+        // console.log("7. Chat - Conversation changed");
+        // console.log("7.1 Old conversation:", oldConv);
+        // console.log("7.2 New conversation:", newConv);
+    },
+    { immediate: true }
+);
+
+const sendMessageToConversation = () => {
+    // console.log("0. Starting to send message");
+    if (!messageForm.message || messageForm.processing) return;
+
+    // Add optimistic message to UI
+    const optimisticMessage = {
+        content: messageForm.message,
+        role: "user",
+        created_at: new Date().toISOString(),
+    };
+
+    messages.value = [...messages.value, optimisticMessage];
+    scrollToBottom();
+
+    // Emit with just the necessary data
+    emit("messageSent", {
+        content: messageForm.message,
+        conversationId: props.conversation.id,
+    });
+
+    messageForm.reset("message");
+    // Fix: Use textarea.value instead of textarea directly
+    if (textarea.value) {
+        autoResize({ target: textarea.value });
     }
 };
 
-// Scroll to bottom of messages
+const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessageToConversation();
+    }
+};
+
+const handleEnter = () => {
+    sendMessageToConversation();
+};
+
+const autoResize = (e) => {
+    const textarea = e.target;
+    textarea.style.height = "44px";
+    const scrollHeight = Math.min(textarea.scrollHeight, 200);
+    textareaHeight.value = scrollHeight;
+};
+
+// Add scrollToBottom function
 const scrollToBottom = () => {
     nextTick(() => {
         if (messagesContainer.value) {
@@ -258,139 +335,17 @@ const scrollToBottom = () => {
     });
 };
 
-const adjustTextareaHeight = () => {
-    const textarea = messageInput.value;
-    if (!textarea) return;
-
-    // Reset height to auto to get the correct scrollHeight
-    textarea.style.height = "auto";
-
-    // Set new height based on scrollHeight
-    const newHeight = Math.min(textarea.scrollHeight, 200); // Max height of 200px
-    textarea.style.height = `${newHeight}px`;
-};
-
-const sendMessageToConversation = () => {
-    console.log("Starting sendMessageToConversation");
-
-    if (
-        !props.conversation?.id ||
-        !messageForm.message ||
-        messageForm.processing
-    ) {
-        console.log("Validation failed:", {
-            hasConversation: !!props.conversation?.id,
-            hasMessage: !!messageForm.message,
-            isProcessing: messageForm.processing,
-        });
-        return;
-    }
-
-    messageForm.processing = true;
-
-    // Create temporary message for optimistic UI
-    const tempMessage = {
-        role: "user",
-        content: messageForm.message,
-        updated_at: new Date().toISOString(),
-    };
-
-    if (Array.isArray(messages.value)) {
-        messages.value.push(tempMessage);
-        scrollToBottom();
+const handleCopy = async (text, messageId) => {
+    const success = await copyToClipboard(text);
+    if (success) {
+        copiedStates.value.set(messageId, true);
+        setTimeout(() => {
+            copiedStates.value.delete(messageId);
+        }, 2000);
     } else {
-        messages.value = [tempMessage];
-    }
-
-    // Correctly structure the data for the request
-    messageForm.post(route("ask.post"), {
-        preserveScroll: true,
-        onSuccess: (response) => {
-            console.log("Request successful:", response);
-            if (response?.props?.conversation?.messages) {
-                messages.value = response.props.conversation.messages;
-            }
-            messageForm.reset("message");
-            adjustTextareaHeight();
-            scrollToBottom();
-        },
-        onError: (errors) => {
-            console.error("Request failed with errors:", errors);
-            messages.value = messages.value.filter((m) => m !== tempMessage);
-        },
-        onFinish: () => {
-            messageForm.processing = false;
-        },
-    });
-};
-
-const copyToClipboard = async (text) => {
-    try {
-        if (!navigator.clipboard) {
-            // Fallback for older browsers
-            const textArea = document.createElement("textarea");
-            textArea.value = text;
-            document.body.appendChild(textArea);
-            textArea.select();
-            try {
-                document.execCommand("copy");
-                isCopied.value = true;
-                setTimeout(() => (isCopied.value = false), 1000);
-            } catch (err) {
-                console.error("Fallback: Impossible de copier le texte", err);
-            }
-            document.body.removeChild(textArea);
-            return;
-        }
-
-        await navigator.clipboard.writeText(text);
-        isCopied.value = true;
-        setTimeout(() => (isCopied.value = false), 1000);
-    } catch (err) {
-        console.error("Failed to copy text: ", err);
+        alert("Unable to copy text to clipboard");
     }
 };
-
-const clearChat = () => {
-    messages.value = [];
-    messageForm.conversation_id = null;
-    messageForm.model = props.defaultModel;
-};
-
-// Add clearChat to expose it to the parent component
-defineExpose({ clearChat });
-
-// Update the watch handler for the conversation to properly handle model selection
-watch(
-    () => props.conversation,
-    (newConversation) => {
-        messages.value = newConversation?.messages || [];
-        messageForm.conversation_id = newConversation?.id;
-        scrollToBottom();
-    },
-    { immediate: true }
-);
-
-const handleKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendMessageToConversation();
-    }
-};
-
-const textareaHeight = ref(44);
-
-const autoResize = (e) => {
-    const textarea = e.target;
-    textarea.style.height = "44px";
-    const scrollHeight = Math.min(textarea.scrollHeight, 200);
-    textareaHeight.value = scrollHeight;
-};
-
-onMounted(() => {
-    scrollToBottom();
-    adjustTextareaHeight();
-});
 </script>
 
 <style>

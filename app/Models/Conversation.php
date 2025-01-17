@@ -12,7 +12,7 @@ class Conversation extends Model
     protected $fillable = [
         'title',
         'model_id',
-        'model_name',
+        'custom_instruction_id',
         'user_id'
     ];
 
@@ -24,5 +24,10 @@ class Conversation extends Model
     public function messages()
     {
         return $this->hasMany(Message::class);
+    }
+
+    public function customInstruction()
+    {
+        return $this->belongsTo(CustomInstruction::class);
     }
 }

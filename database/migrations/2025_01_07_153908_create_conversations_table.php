@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->string('title')->default('Conversation en cours ...');
             $table->string('model_id');
-            $table->string('model_name');
+            $table->foreignId('custom_instruction_id')->nullable()->constrained()->onDelete('set null');
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
             $table->timestamps();
         });
