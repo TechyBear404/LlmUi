@@ -143,11 +143,17 @@
                 </div>
             </div>
 
-            <!-- Input container - now properly fixed at bottom -->
+            <!-- Input container -->
             <div
                 class="flex-none w-full p-4 border-t border-gray-700 bg-slate-900"
             >
                 <div class="relative max-w-4xl mx-auto">
+                    <!-- Replace file input with FileDropZone -->
+                    <FileDropZone
+                        v-model="files"
+                        accept=".pdf,.docx,.txt,.js,.vue,.php,.log"
+                        class="mb-4"
+                    />
                     <textarea
                         ref="textarea"
                         v-model="messageForm.message"
@@ -169,7 +175,8 @@
                         @click="sendMessageToConversation"
                         class="absolute p-2 text-gray-400 right-2 bottom-2 hover:text-purple-500 disabled:opacity-50"
                         :disabled="
-                            !messageForm.message || messageForm.processing
+                            (!messageForm.message && !files?.length) ||
+                            messageForm.processing
                         "
                     >
                         <font-awesome-icon
@@ -191,13 +198,16 @@
 import { ref, watch, nextTick } from "vue";
 import { formatDateTime, renderMarkdown, copyToClipboard } from "@/Lib/utils";
 import { useForm } from "@inertiajs/vue3";
-
-// Remove MarkdownIt and hljs imports as they're no longer needed here
+import FileDropZone from "./FileDropZone.vue";
 
 const props = defineProps({
     conversation: {
         type: Object,
         default: null,
+    },
+    currentModel: {
+        type: Object,
+        required: true,
     },
     loading: Boolean,
     flash: {
@@ -218,9 +228,14 @@ const textareaHeight = ref(44);
 // Replace single isCopied with a Map to track per-message copy state
 const copiedStates = ref(new Map());
 
+// Initialize files ref with empty array
+const files = ref([]);
+
+// Modify messageForm to include files
 const messageForm = useForm({
     message: "",
     conversation_id: props.conversation?.id,
+    files: [],
 });
 
 // Watch for conversation changes to update form
@@ -237,14 +252,11 @@ watch(
 watch(
     () => props.conversation?.messages,
     (newMessages) => {
-        // console.log("7. Chat - New messages received:", newMessages);
         if (newMessages) {
             messages.value = [...newMessages];
-            // console.log("8. Chat - Messages updated:", messages.value);
             scrollToBottom();
         } else {
             messages.value = [];
-            // console.log("9. Chat - Messages cleared");
         }
     },
     { immediate: true, deep: true }
@@ -253,58 +265,78 @@ watch(
 watch(
     () => props.conversation?.messages,
     (newMessages, oldMessages) => {
-        // console.log("5. Chat - Messages watch triggered");
-        // console.log("5.1 Old messages:", oldMessages);
-        // console.log("5.2 New messages:", newMessages);
-
         if (newMessages) {
             messages.value = [...newMessages];
-            // console.log("6. Chat - Updated local messages:", messages.value);
             scrollToBottom();
         } else {
             messages.value = [];
-            // console.log("6.1 Chat - Cleared messages");
         }
     },
     { immediate: true, deep: true }
 );
 
-// Add watch for immediate conversation changes
-watch(
-    () => props.conversation,
-    (newConv, oldConv) => {
-        // console.log("7. Chat - Conversation changed");
-        // console.log("7.1 Old conversation:", oldConv);
-        // console.log("7.2 New conversation:", newConv);
-    },
-    { immediate: true }
-);
+// Fonction pour gérer le changement de fichier
+const handleFileChange = async (e) => {
+    const file = e.target.files[0]; // Get the file
+    if (file) {
+        try {
+            const content = await readFile(file); // Read file content
+            messageForm.message = content; // Set the message content to the file content
+            messageForm.file = file; // Attach file to the form data
+        } catch (err) {
+            console.error("Error reading file", err);
+        }
+    }
+};
+
+// Fonction pour lire un fichier
+const readFile = (file) => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result); // Résultat de la lecture
+        reader.onerror = (error) => reject(error); // Gérer les erreurs
+        reader.readAsText(file); // Lire le fichier comme texte
+    });
+};
 
 const sendMessageToConversation = () => {
-    // console.log("0. Starting to send message");
-    if (!messageForm.message || messageForm.processing) return;
+    if (
+        (!messageForm.message && files.value.length === 0) ||
+        messageForm.processing
+    )
+        return;
 
-    // Add optimistic message to UI
-    const optimisticMessage = {
-        content: messageForm.message,
-        role: "user",
-        created_at: new Date().toISOString(),
-    };
+    const formData = new FormData();
+    formData.append("conversation_id", props.conversation.id);
 
-    messages.value = [...messages.value, optimisticMessage];
-    scrollToBottom();
+    if (messageForm.message) {
+        formData.append("message", messageForm.message);
+    }
 
-    // Emit with just the necessary data
-    emit("messageSent", {
-        content: messageForm.message,
-        conversationId: props.conversation.id,
-    });
+    // Fix: Append files with correct key
+    if (files.value.length > 0) {
+        files.value.forEach((file) => {
+            formData.append("files[]", file);
+        });
+    }
+
+    // Add optimistic message
+    if (messageForm.message) {
+        messages.value = [
+            ...messages.value,
+            {
+                content: messageForm.message,
+                role: "user",
+                created_at: new Date().toISOString(),
+            },
+        ];
+        scrollToBottom();
+    }
+
+    emit("messageSent", formData);
 
     messageForm.reset("message");
-    // Fix: Use textarea.value instead of textarea directly
-    if (textarea.value) {
-        autoResize({ target: textarea.value });
-    }
+    files.value = [];
 };
 
 const handleKeyDown = (e) => {
@@ -405,13 +437,10 @@ textarea.textarea-scroll {
 
 .textarea-scroll[style*="height: 200px"] {
     overflow-y: auto;
-}
-
-/* Remove the conflicting textarea styles */
+} /* Remove the conflicting textarea styles */
 textarea {
     overflow-y: auto;
 }
-
 .min-h-0 {
     min-height: 0;
 }

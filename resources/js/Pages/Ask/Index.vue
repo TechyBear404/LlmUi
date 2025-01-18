@@ -138,23 +138,18 @@ const handleInstructionSelected = (instructionId) => {
     }
 };
 
-const handleMessageSent = (message) => {
-    // console.log("1. Message sent:", message);
-
-    const form = useForm({
-        conversation_id: currentConversation.value.id,
-        message: message.content,
-        model: currentModel.value,
-    });
-
-    form.post(route("ask.post"), {
+const handleMessageSent = (formData) => {
+    useForm({
+        conversation_id: formData.get("conversation_id"),
+        message: formData.get("message"),
+        files: formData.getAll("files[]"), // Fix: Get all files with correct key
+    }).post(route("ask.post"), {
         preserveScroll: true,
+        forceFormData: true, // Add this
         onSuccess: (page) => {
             const updatedConversation = page.props.flash?.conversation;
             if (updatedConversation) {
-                // Update current conversation
                 currentConversation.value = { ...updatedConversation };
-                // Update conversation in list
                 conversations.value = conversations.value.map((conv) =>
                     conv.id === updatedConversation.id
                         ? updatedConversation

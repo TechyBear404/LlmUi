@@ -4,6 +4,7 @@ use App\Http\Controllers\AskController;
 use App\Http\Controllers\ConversationController;
 use App\Http\Controllers\CustomInstructionController;
 use App\Http\Controllers\MessageController;
+use App\Http\Controllers\SettingsController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -43,4 +44,8 @@ Route::middleware(['auth'])->group(function () {
         Route::delete('/{instruction}', [CustomInstructionController::class, 'destroy'])->name('destroy');
         Route::post('/{instruction}/set-active', [CustomInstructionController::class, 'setActive'])->name('set-active');
     });
+    Route::get('/settings', [SettingsController::class, 'index'])
+        ->name('settings.index');
+    Route::put('/settings', [SettingsController::class, 'update'])
+        ->name('settings.update');
 });

@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\CustomInstruction;
+use App\Models\Domain;
+use App\Models\SettingType;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 
 class CustomInstructionController extends Controller
@@ -11,11 +14,22 @@ class CustomInstructionController extends Controller
     public function index()
     {
         $instructions = auth()->user()->customInstructions()
+            ->with(['settings.settingType', 'settings.selectedOption', 'domains.settings'])
             ->orderBy('created_at', 'desc')
             ->get();
 
+        $settingTypes = SettingType::with('options')
+            ->where('is_active', true)
+            ->get();
+
+        $domains = Domain::with('settings')
+            ->where('is_active', true)
+            ->get();
+
         return Inertia::render('CustomInstructions/Index', [
-            'instructions' => $instructions
+            'instructions' => $instructions,
+            'settingTypes' => $settingTypes,
+            'domains' => $domains
         ]);
     }
 
@@ -25,9 +39,33 @@ class CustomInstructionController extends Controller
             'name' => 'required|string|max:255',
             'about_user' => 'required|string',
             'ai_response_style' => 'required|string',
+            'settings' => 'array',
+            'domains' => 'array'
         ]);
 
-        $instruction = auth()->user()->customInstructions()->create($validated);
+        $instruction = auth()->user()->customInstructions()->create([
+            'name' => $validated['name'],
+            'about_user' => $validated['about_user'],
+            'ai_response_style' => $validated['ai_response_style']
+        ]);
+
+        // Store settings if provided
+        if (isset($validated['settings'])) {
+            foreach ($validated['settings'] as $typeId => $setting) {
+                if (!empty($setting['option_id'])) {
+                    $instruction->settings()->create([
+                        'setting_type_id' => $typeId,
+                        'setting_option_id' => $setting['option_id'],
+                        'custom_value' => $setting['custom_value'] ?? null,
+                        'domain_id' => null // Explicitly set as null if not domain-specific
+                    ]);
+                }
+            }
+        }
+
+        if (isset($validated['domains'])) {
+            $instruction->domains()->attach($validated['domains']);
+        }
 
         return back()->with('success', 'Custom instruction created successfully');
     }
@@ -38,9 +76,33 @@ class CustomInstructionController extends Controller
             'name' => 'required|string|max:255',
             'about_user' => 'required|string',
             'ai_response_style' => 'required|string',
+            'settings' => 'array',
+            'domains' => 'array'
         ]);
 
         $instruction->update($validated);
+
+        // Update settings
+        if (isset($validated['settings'])) {
+            // First, remove all existing settings
+            $instruction->settings()->delete();
+
+            // Then create new settings
+            foreach ($validated['settings'] as $typeId => $setting) {
+                if (!empty($setting['option_id'])) {
+                    $instruction->settings()->create([
+                        'setting_type_id' => $typeId,
+                        'setting_option_id' => $setting['option_id'],
+                        'custom_value' => $setting['custom_value'] ?? null,
+                        'domain_id' => null // Explicitly set as null if not domain-specific
+                    ]);
+                }
+            }
+        }
+
+        if (isset($validated['domains'])) {
+            $instruction->domains()->sync($validated['domains']);
+        }
 
         return back()->with('success', 'Custom instruction updated successfully');
     }
@@ -49,16 +111,5 @@ class CustomInstructionController extends Controller
     {
         $instruction->delete();
         return back()->with('success', 'Custom instruction deleted successfully');
-    }
-
-    public function setActive(CustomInstruction $instruction)
-    {
-        // Deactivate all other instructions
-        auth()->user()->customInstructions()->update(['is_active' => false]);
-
-        // Activate the selected instruction
-        $instruction->update(['is_active' => true]);
-
-        return back()->with('success', 'Custom instruction set as active');
     }
 }

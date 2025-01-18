@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\Conversation;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 
 class ChatService
 {
@@ -37,6 +36,10 @@ class ChatService
                 'Authorization' => 'Bearer ' . $this->apiKey,
             ])->get($this->baseUrl . '/models');
 
+            logger()->info('Fetched models from API', [
+                'response' => $response->json()
+            ]);
+
             return collect($response->json()['data'])
                 ->filter(function ($model) {
                     return str_ends_with($model['id'], ':free');
@@ -52,8 +55,7 @@ class ChatService
                     ];
                 })
                 ->values()
-                ->all()
-            ;
+                ->all();
         });
     }
 
@@ -69,116 +71,73 @@ class ChatService
         ?string $model = null,
         float $temperature = 0.7,
         bool $isTitle = false,
-        ?Conversation $conversation = null
+        Conversation $conversation = null
     ): string {
         try {
-            // Make sure conversation is loaded with customInstruction
-            if ($conversation && !$conversation->relationLoaded('customInstruction')) {
-                $conversation->load('customInstruction');
-            }
+            if ($conversation) {
+                // Load messages if not provided
+                if (!$messages) {
+                    $messages = $conversation->messages()
+                        ->orderBy('created_at')
+                        ->get()
+                        ->map(fn($msg) => [
+                            'role' => $msg->role,
+                            'content' => $msg->content,
+                        ])
+                        ->toArray();
+                }
 
-            // If conversation is provided and no messages are provided, use conversation messages
-            if ($conversation && !$messages) {
-                $messages = $conversation->messages()
-                    ->orderBy('created_at')
-                    ->get()
-                    ->map(function ($message) {
-                        return [
-                            'role' => $message->role,
-                            'content' => $message->content
-                        ];
-                    })
-                    ->toArray();
-            }
+                // Include system prompt
+                $systemPrompt = $isTitle
+                    ? $this->getTitleSystemPrompt()
+                    : $this->getChatSystemPrompt($conversation);
 
-            // Ensure messages is an array
-            $messages = $messages ?? [];
-
-            // logger()->info('Starting sendMessage request', [
-            //     'model' => $model,
-            //     'temperature' => $temperature,
-            //     'isTitle' => $isTitle,
-            //     'messagesCount' => count($messages),
-            //     'conversationId' => $conversation?->id,
-            //     'hasCustomInstruction' => $conversation?->customInstruction !== null,
-            //     'modelId' => $conversation?->model_id,
-            // ]);
-
-            // Use conversation's model if available and no specific model provided
-            if (!$model && $conversation && $conversation->model_id) {
-                $model = $conversation->model_id;
-            }
-
-            if ($isTitle) {
                 array_unshift($messages, [
                     'role' => 'system',
-                    'content' => $this->getTitleSystemPrompt()
-                ]);
-            } else {
-                array_unshift($messages, [
-                    'role' => 'system',
-                    'content' => $this->getChatSystemPrompt($conversation)
+                    'content' => $systemPrompt,
                 ]);
             }
 
-            $models = collect($this->getModels());
-            if (!$model || !$models->contains('id', $model)) {
-                $model = self::DEFAULT_MODEL;
-            }
+            $model = $model ?? ($conversation->model_id ?? self::DEFAULT_MODEL);
 
-            // logger()->info('API request parameters', [
-            //     'model' => $model,
-            //     'messages' => $messages,
-            //     'temperature' => $temperature
-            // ]);
 
+            // Send request
             $response = $this->client->chat()->create([
                 'model' => $model,
                 'messages' => $messages,
                 'temperature' => $temperature,
             ]);
 
-            // logger()->info('API response received', [
-            //     'status' => 'success',
-            //     'content_length' => strlen($response->choices[0]->message->content ?? '')
-            // ]);
-
-            if (!isset($response->choices[0]->message->content)) {
-                throw new \Exception("Invalid response from API");
+            // Add response validation
+            if (!isset($response['choices']) || empty($response['choices'])) {
+                logger()->error('Invalid API response:', ['response' => $response]);
+                throw new \Exception('Invalid response from AI service');
             }
 
-            return $response->choices[0]->message->content;
+            return $response['choices'][0]['message']['content'] ?? null;
         } catch (\Exception $e) {
-            // logger()->error('Error in sendMessage:', [
-            //     'message' => $e->getMessage(),
-            //     'trace' => $e->getTraceAsString(),
-            //     'model' => $model,
-            //     'temperature' => $temperature,
-            //     'isTitle' => $isTitle,
-            //     'conversationId' => $conversation?->id
-            // ]);
+            logger()->error('Chat service error:', [
+                'error' => $e->getMessage(),
+                'model' => $model,
+                'conversation_id' => $conversation->id
+            ]);
             throw $e;
         }
     }
 
-    public function makeTitle(string $messages, string $model): string
+    public function makeTitle(Conversation $conversation = null): string
     {
         try {
-            $messages = [
-                [
-                    'role' => 'user',
-                    'content' => $messages
-                ]
-            ];
 
-            return $this->sendMessage($messages, $model, 0.7, true);
+
+            return $this->sendMessage($conversation, 0.7, true);
         } catch (\Exception $e) {
             logger()->error('Error in makeTitle:', [
                 'message' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
             // Return a truncated version of the message if title generation fails
-            return substr($message, 0, 50) . '...';
+            return substr($conversation->messages()->last()->content, 0, 50) . '...';
         }
     }
 
@@ -191,52 +150,23 @@ class ChatService
         ;
     }
 
-    /**
-     * @return string
-     */
     private function getChatSystemPrompt(?Conversation $conversation = null): string
     {
-        $user = Auth::user();
         $now = now()->locale('fr')->format('l d F Y H:i');
+        $user = Auth::user();
 
-        // Build the prompt content
-        $promptContent = '';
+        if ($conversation && $conversation->customInstruction) {
+            $customInstruction = $conversation->customInstruction->getFormattedInstructions();
 
-        // Make sure customInstruction exists and is loaded
-        if (
-            $conversation &&
-            $conversation->custom_instruction_id &&
-            $conversation->customInstruction
-        ) {
+            // logger()->info('Using custom instruction for chat system prompt', [
+            //     'conversationId' => $conversation->id,
+            //     'customInstruction' => $customInstruction
+            // ]);
 
-            $instruction = $conversation->customInstruction;
-            $promptContent = '';
-
-            if ($instruction->about_user) {
-                $promptContent .= "À propos de l'utilisateur:\n" . $instruction->about_user . "\n\n";
-            }
-
-            if ($instruction->ai_response_style) {
-                $promptContent .= "Style de réponse souhaité:\n" . $instruction->ai_response_style;
-            }
-
-            // If no content was added from custom instruction, fallback to default
-            if (empty(trim($promptContent))) {
-                $promptContent = $this->getDefaultPrompt($user, $now);
-            }
-        } else {
-            $promptContent = $this->getDefaultPrompt($user, $now);
+            return $customInstruction;
         }
 
-        // Add detailed logging
-        logger()->info('Chat system prompt', [
-            'promptContent' => $promptContent,
-            'conversationId' => $conversation?->id,
-            'hasCustomInstruction' => $conversation?->customInstruction !== null,
-            'customInstructionId' => $conversation?->custom_instruction_id,
-        ]);
-
-        return $promptContent;
+        return $this->getDefaultPrompt($user, $now);
     }
 
     private function getDefaultPrompt($user, $now): string
