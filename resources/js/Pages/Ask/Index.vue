@@ -72,6 +72,8 @@ const currentModel = ref(
         (m) => m.id === "meta-llama/llama-3.2-11b-vision-instruct:free"
     )
 );
+const localMessages = ref([]);
+const chatComponent = ref(null);
 
 // Define selectConversation before it's used in watchers
 const selectConversation = (conversation) => {
@@ -140,9 +142,10 @@ const handleInstructionSelected = (instructionId) => {
 
 const handleMessageSent = (formData) => {
     useForm({
-        conversation_id: formData.get("conversation_id"),
+        // conversation_id: formData.get("conversation_id"),
         message: formData.get("message"),
-        files: formData.getAll("files[]"), // Fix: Get all files with correct key
+        conversation: currentConversation.value,
+        // files: formData.getAll("files[]"), // Fix: Get all files with correct key
     }).post(route("ask.post"), {
         preserveScroll: true,
         forceFormData: true, // Add this
@@ -205,6 +208,64 @@ watch(
     { immediate: true }
 );
 
+watch(
+    () => currentConversation.value,
+    (newConversation, oldConversation) => {
+        if (oldConversation) {
+            // Unsubscribe from old channel
+            channelSubscription.value?.unsubscribe();
+        }
+
+        if (newConversation) {
+            const channel = `chat.${newConversation.id}`;
+            console.log("🔌 Tentative de connexion au canal:", channel);
+
+            const subscription = window.Echo.private(channel)
+                .subscribed(() => {
+                    console.log("✅ Connecté avec succès au canal:", channel);
+                })
+                .error((error) => {
+                    console.error("❌ Erreur de connexion au canal:", error);
+                })
+                .listen(".message.streamed", (event) => {
+                    console.log("📨 Message reçu:", event);
+
+                    const lastMessage =
+                        localMessages.value[localMessages.value.length - 1];
+
+                    if (!lastMessage || lastMessage.role !== "assistant") {
+                        console.log(
+                            "⚠️ Aucun message assistant ciblé pour concaténer"
+                        );
+                        return;
+                    }
+
+                    if (event.error) {
+                        console.error("❌ Erreur reçue:", event.error);
+                        localMessages.value.pop();
+                        props.flash.error = event.content;
+                        return;
+                    }
+
+                    if (lastMessage.isLoading && event.content) {
+                        lastMessage.isLoading = false;
+                    }
+
+                    if (!event.isComplete) {
+                        lastMessage.content += event.content;
+                        nextTick(() => chatComponent.value?.scrollToBottom());
+                    }
+
+                    if (event.isComplete) {
+                        console.log("✅ Message complet reçu");
+                    }
+                });
+
+            channelSubscription.value = subscription;
+        }
+    },
+    { immediate: true }
+);
 // Basic utilities
 const handleResize = (width) => {
     sidebarWidth.value = width;
@@ -219,10 +280,13 @@ const handleConversationDelete = (conversationId) => {
     }
 };
 
+const channelSubscription = ref(null);
+
 // Initialize first conversation
 onMounted(() => {
     if (conversations.value.length > 0) {
         selectConversation(conversations.value[0]);
     }
+    channelSubscription.value?.unsubscribe();
 });
 </script>

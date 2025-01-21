@@ -6,6 +6,8 @@ use App\Models\Conversation;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 
+
+
 class ChatService
 {
     private $baseUrl;
@@ -66,61 +68,104 @@ class ChatService
      *
      * @return string
      */
-    public function sendMessage(
-        ?array $messages = null,
-        ?string $model = null,
-        float $temperature = 0.7,
-        bool $isTitle = false,
-        Conversation $conversation = null
-    ): string {
+    // public function sendMessage(
+    //     ?array $messages = null,
+    //     ?string $model = null,
+    //     float $temperature = 0.7,
+    //     bool $isTitle = false,
+    //     Conversation $conversation = null
+    // ): string {
+    //     try {
+    //         if ($conversation) {
+    //             // Load messages if not provided
+    //             if (!$messages) {
+    //                 $messages = $conversation->messages()
+    //                     ->orderBy('created_at')
+    //                     ->get()
+    //                     ->map(fn($msg) => [
+    //                         'role' => $msg->role,
+    //                         'content' => $msg->content,
+    //                     ])
+    //                     ->toArray();
+    //             }
+
+    //             // Include system prompt
+    //             $systemPrompt = $isTitle
+    //                 ? $this->getTitleSystemPrompt()
+    //                 : $this->getChatSystemPrompt($conversation);
+
+    //             array_unshift($messages, [
+    //                 'role' => 'system',
+    //                 'content' => $systemPrompt,
+    //             ]);
+    //         }
+
+    //         $model = $model ?? ($conversation->model_id ?? self::DEFAULT_MODEL);
+
+
+    //         // Send request
+    //         $response = $this->client->chat()->create([
+    //             'model' => $model,
+    //             'messages' => $messages,
+    //             'temperature' => $temperature,
+    //         ]);
+
+    //         logger()->info('API response:', ['response' => $response]);
+
+    //         // Add response validation
+    //         if (!isset($response['choices']) || empty($response['choices'])) {
+    //             logger()->error('Invalid API response:', ['response' => $response]);
+    //             throw new \Exception('Invalid response from AI service');
+    //         }
+
+    //         return $response['choices'][0]['message']['content'] ?? null;
+    //     } catch (\Exception $e) {
+    //         logger()->error('Chat service error:', [
+    //             'error' => $e->getMessage(),
+    //             'model' => $model,
+    //             'conversation_id' => $conversation->id
+    //         ]);
+    //         throw $e;
+    //     }
+    // }
+    public function sendMessage(array $messages, string $model = null, float $temperature = 0.7): string
+    {
         try {
-            if ($conversation) {
-                // Load messages if not provided
-                if (!$messages) {
-                    $messages = $conversation->messages()
-                        ->orderBy('created_at')
-                        ->get()
-                        ->map(fn($msg) => [
-                            'role' => $msg->role,
-                            'content' => $msg->content,
-                        ])
-                        ->toArray();
-                }
+            logger()->info('Envoi du message', [
+                'model' => $model,
+                'temperature' => $temperature,
+            ]);
 
-                // Include system prompt
-                $systemPrompt = $isTitle
-                    ? $this->getTitleSystemPrompt()
-                    : $this->getChatSystemPrompt($conversation);
-
-                array_unshift($messages, [
-                    'role' => 'system',
-                    'content' => $systemPrompt,
-                ]);
+            $models = collect($this->getModels());
+            if (
+                !$model || !$models->contains('id', $model)
+            ) {
+                $model = self::DEFAULT_MODEL;
+                logger()->info('Modèle par défaut utilisé:', ['model' => $model]);
             }
 
-            $model = $model ?? ($conversation->model_id ?? self::DEFAULT_MODEL);
-
-
-            // Send request
+            $messages = [$this->getChatSystemPrompt(), ...$messages];
             $response = $this->client->chat()->create([
                 'model' => $model,
                 'messages' => $messages,
                 'temperature' => $temperature,
             ]);
 
-            // Add response validation
-            if (!isset($response['choices']) || empty($response['choices'])) {
-                logger()->error('Invalid API response:', ['response' => $response]);
-                throw new \Exception('Invalid response from AI service');
+            logger()->info('Réponse reçue:', ['response' => $response]);
+
+            $content = $response->choices[0]->message->content;
+
+            return $content;
+        } catch (\Exception $e) {
+            if ($e->getMessage() === 'Undefined array key "choices"') {
+                throw new \Exception("Limite de messages atteinte");
             }
 
-            return $response['choices'][0]['message']['content'] ?? null;
-        } catch (\Exception $e) {
-            logger()->error('Chat service error:', [
-                'error' => $e->getMessage(),
-                'model' => $model,
-                'conversation_id' => $conversation->id
+            logger()->error('Erreur dans sendMessage:', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
+
             throw $e;
         }
     }
@@ -197,5 +242,36 @@ class ChatService
             4. Évite les répétitions inutiles et privilégie des termes spécifiques et évocateurs.
             5. Si possible, utilise un ton neutre et objectif.
         EOT;
+    }
+
+    public function streamConversation(array $messages, ?string $model = null, float $temperature = 0.7)
+    {
+        try {
+            logger()->info('Début streamConversation', [
+                'model' => $model,
+                'temperature' => $temperature,
+            ]);
+
+            $models = collect($this->getModels());
+            if (!$model || !$models->contains('id', $model)) {
+                $model = self::DEFAULT_MODEL;
+                logger()->info('Modèle par défaut utilisé:', ['model' => $model]);
+            }
+
+            $messages = [$this->getChatSystemPrompt(), ...$messages];
+
+            // Méthode "createStreamed" qui renvoie un flux "StreamResponse"
+            return $this->client->chat()->createStreamed([
+                'model' => $model,
+                'messages' => $messages,
+                'temperature' => $temperature,
+            ]);
+        } catch (\Exception $e) {
+            logger()->error('Erreur dans streamConversation:', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            throw $e;
+        }
     }
 }
