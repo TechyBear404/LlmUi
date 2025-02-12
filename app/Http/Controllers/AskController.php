@@ -38,7 +38,6 @@ class AskController extends Controller
 
     public function ask(Request $request)
     {
-        // dd($request->all());
         $validatedData = $request->validate([
             'conversation_id' => 'required|exists:conversations,id',
             'message' => 'nullable|string',
